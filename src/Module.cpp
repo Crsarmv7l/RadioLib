@@ -158,6 +158,17 @@ void Module::SPIwriteRegisterBurst(uint32_t reg, const uint8_t* data, size_t num
   }
 }
 
+void Module::SPIfifoRefill(uint8_t* data, size_t numBytes) {
+  this->hal->spiBeginTransaction();
+  this->hal->digitalWrite(this->csPin, this->hal->GpioLevelLow);
+  // Wait for SO to go low page 29 "When CSn is pulled low, the MCU 
+  // must wait until CC1101 SO pin goes low before starting to transfer the header byte."
+  while(this->hal->digitalRead(37)){};
+  this->hal->fifoTransfer(data, numBytes);
+  this->hal->digitalWrite(this->csPin, this->hal->GpioLevelHigh);
+  this->hal->spiEndTransaction();
+}
+
 void Module::SPIwriteRegister(uint32_t reg, uint8_t data) {
   if(!spiConfig.stream) {
     SPItransfer(spiConfig.cmds[RADIOLIB_MODULE_SPI_COMMAND_WRITE], reg, &data, NULL, 1);
