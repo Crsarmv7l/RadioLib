@@ -156,6 +156,13 @@ class RadioLibHal {
     virtual void spiTransfer(uint8_t* out, size_t len, uint8_t* in) = 0;
 
     /*!
+      \brief Method to refill fifo without creating new buffers.
+      \param len Number of data to send or receive.
+      \param in Buffer to save received data into.
+    */
+    virtual void fifoTransfer(uint8_t* out, size_t len) = 0;
+
+    /*!
       \brief Method to end SPI transaction.
     */
     virtual void spiEndTransaction() = 0;
