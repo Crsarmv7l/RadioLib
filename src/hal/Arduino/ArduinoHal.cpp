@@ -106,6 +106,14 @@ void ArduinoHal::spiTransfer(uint8_t* out, size_t len, uint8_t* in) {
   }
 }
 
+void ArduinoHal::fifoTransfer(uint8_t* out, size_t len) {
+  spi->transfer(0x7F);
+  for(size_t i = 0; i < len; i++) {
+    spi->transfer(out[i]);
+    asm volatile ( "NOP"::);
+  }
+}
+
 void inline ArduinoHal::spiEndTransaction() {
   spi->endTransaction();
 }
