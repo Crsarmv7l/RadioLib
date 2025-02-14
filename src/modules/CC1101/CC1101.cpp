@@ -300,7 +300,7 @@ int16_t CC1101::startTransmit(const uint8_t* data, size_t len, uint8_t addr) {
     //If there is room add more data to the FIFO
     if (fifoBytes < RADIOLIB_CC1101_FIFO_SIZE) {
         uint8_t bytesToWrite = RADIOLIB_MIN((uint8_t)(RADIOLIB_CC1101_FIFO_SIZE - fifoBytes), (uint8_t)(len - dataSent));
-        SPIwriteRegisterBurst(RADIOLIB_CC1101_REG_FIFO, const_cast<uint8_t*>(&data[dataSent]), bytesToWrite);
+        SPIfifoRefill(const_cast<uint8_t*>(&data[dataSent]), bytesToWrite);
         dataSent += bytesToWrite;
     }
   }
