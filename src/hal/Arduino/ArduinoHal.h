@@ -48,6 +48,7 @@ class ArduinoHal : public RadioLibHal {
     void spiBegin() override;
     void spiBeginTransaction() override;
     void spiTransfer(uint8_t* out, size_t len, uint8_t* in) override;
+    void fifoTransfer(uint8_t* out, size_t len) override;
     void spiEndTransaction() override;
     void spiEnd() override;
 
