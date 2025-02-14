@@ -1014,6 +1014,7 @@ class CC1101: public PhysicalLayer {
     void SPIreadRegisterBurst(uint8_t reg, uint8_t numBytes, uint8_t* inBytes);
     uint8_t SPIreadRegister(uint8_t reg);
     void SPIwriteRegisterBurst(uint8_t reg, const uint8_t* data, size_t len);
+    void SPIfifoRefill(uint8_t* data, size_t len);
     void SPIwriteRegister(uint8_t reg, uint8_t data);
 
     void SPIsendCommand(uint8_t cmd);
