@@ -301,6 +301,13 @@ class Module {
     void SPIwriteRegisterBurst(uint32_t reg, const uint8_t* data, size_t numBytes);
 
     /*!
+      \brief SPI fifo refill method.
+      \param data Pointer to array that holds the data that will be written.
+      \param numBytes Number of bytes that will be written.
+    */
+    void SPIfifoRefill(uint8_t* data, size_t numBytes);
+
+    /*!
       \brief SPI basic write method. Use of this method is reserved for special cases, SPIsetRegValue should be used instead.
       \param reg Address of SPI register to write.
       \param data Value that will be written to the register.
