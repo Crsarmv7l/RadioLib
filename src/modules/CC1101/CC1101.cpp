@@ -1220,6 +1220,10 @@ void CC1101::SPIwriteRegisterBurst(uint8_t reg, const uint8_t* data, size_t len)
   this->mod->SPIwriteRegisterBurst(reg | RADIOLIB_CC1101_CMD_BURST, data, len);
 }
 
+void CC1101::SPIfifoRefill(uint8_t* data, size_t len) {
+  this->mod->SPIfifoRefill(data, len);
+}
+
 void CC1101::SPIsendCommand(uint8_t cmd) {
   this->mod->SPItransferStream(&cmd, 1, true, NULL, NULL, 0, false);
 }
