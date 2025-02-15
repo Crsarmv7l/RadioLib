@@ -2,9 +2,9 @@
 
 #include <string.h>
 
-PhysicalLayer::PhysicalLayer(float step, size_t maxLen) {
-  this->freqStep = step;
-  this->maxPacketLength = maxLen;
+PhysicalLayer::PhysicalLayer() {
+  this->freqStep = 1;
+  this->maxPacketLength = 1;
   #if !RADIOLIB_EXCLUDE_DIRECT_RECEIVE
   this->bufferBitPos = 0;
   this->bufferWritePos = 0;
@@ -292,10 +292,6 @@ int16_t PhysicalLayer::setDataRate(DataRate_t dr) {
 int16_t PhysicalLayer::checkDataRate(DataRate_t dr) {
   (void)dr;
   return(RADIOLIB_ERR_UNSUPPORTED);
-}
-
-float PhysicalLayer::getFreqStep() const {
-  return(this->freqStep);
 }
 
 size_t PhysicalLayer::getPacketLength(bool update) {
