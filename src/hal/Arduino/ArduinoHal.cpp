@@ -115,7 +115,7 @@ void ArduinoHal::fifoTransfer(uint8_t* out, size_t len) {
   // SPI can be cranked provided the appropriate delays are inserted between each byte (NOPS)
   // There will be additional time incrementing size_t i below. EG at 80mhz CPU, 8mhz SPI, 1 NOP was enough delay for me
   // More testing required at 10mhz SPI.
-  // Ensure CSn pin is pulled up to mitigate ringing triggering CSn.
+  // Ensure CSn pin is pulled up as default. When pulled low for SPI, it seems to mitigate ringing triggering CSn.
   spi->transfer(0x7F);
   for(size_t i = 0; i < len; i++) {
     spi->transfer(out[i]);
