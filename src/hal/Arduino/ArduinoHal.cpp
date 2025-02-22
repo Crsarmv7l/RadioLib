@@ -107,19 +107,9 @@ void ArduinoHal::spiTransfer(uint8_t* out, size_t len, uint8_t* in) {
 }
 
 void ArduinoHal::fifoTransfer(uint8_t* out, size_t len) {
-  // ESP32-S2 2 clock cycles execution, 4 cycles to get the next instruction
-  // NOP execution time at various CPU speeds, adjust to get 100 nan0second delay required for burst writes
-  // 240mhz/6 cycles = 40; 1000*(1/40) = NOP takes ~ 25 nanoseconds
-  // 160mhz/6 cycles = 26; 1000*(1/26) = NOP takes ~ 38 nanoseconds
-  // 80mhz/ 6 cycles = 13; 1000*(1/13) = NOP takes ~ 77 nanoseconds
-  // SPI can be cranked provided the appropriate delays are inserted between each byte (NOPS)
-  // There will be additional time incrementing size_t i below. EG at 80mhz CPU, 8mhz SPI, 1 NOP was enough delay for me
-  // More testing required at 10mhz SPI.
-  // Ensure CSn pin is pulled up as default. When pulled low for SPI, it seems to mitigate ringing triggering CSn.
   spi->transfer(0x7F);
   for(size_t i = 0; i < len; i++) {
     spi->transfer(out[i]);
-    asm volatile ( "NOP"::);
   }
 }
 
