@@ -284,13 +284,10 @@ int16_t CC1101::startTransmit(const uint8_t* data, size_t len, uint8_t addr) {
   // Keep feeding the FIFO until the packet is done
   while (dataSent < len) {
     uint8_t fifoBytes = 0;
-    uint8_t prevFifobytes = 0;
 
-    // Check number of bytes on FIFO twice due to the CC1101 errata. Block until two reads are equal.
-    do{
+    // Errata wants 2 checks, but it increases SPI noise and seems to result in more tx errors. Just one for now.
+    // TODO: use ISR for refill
       fifoBytes = SPIgetRegValue(RADIOLIB_CC1101_REG_TXBYTES, 6, 0);
-      prevFifobytes = SPIgetRegValue(RADIOLIB_CC1101_REG_TXBYTES, 6, 0);
-    } while (fifoBytes != prevFifobytes);
 
     //If there is room add more data to the FIFO
     if (fifoBytes < RADIOLIB_CC1101_FIFO_SIZE) {
@@ -298,6 +295,7 @@ int16_t CC1101::startTransmit(const uint8_t* data, size_t len, uint8_t addr) {
         SPIfifoRefill(const_cast<uint8_t*>(&data[dataSent]), bytesToWrite);
         dataSent += bytesToWrite;
     }
+    //TODO add a micros delay according to bitrate
   }
   return(state);
 }
