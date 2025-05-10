@@ -87,7 +87,6 @@
 #define RADIOLIB_LORAWAN_RX1_DR_OFFSET                          (0)
 #define RADIOLIB_LORAWAN_JOIN_ACCEPT_DELAY_1_MS                 (5000)
 #define RADIOLIB_LORAWAN_JOIN_ACCEPT_DELAY_2_MS                 (6000)
-#define RADIOLIB_LORAWAN_MAX_FCNT_GAP                           (16384)
 #define RADIOLIB_LORAWAN_ADR_ACK_LIMIT_EXP                      (0x06)
 #define RADIOLIB_LORAWAN_ADR_ACK_DELAY_EXP                      (0x05)
 #define RADIOLIB_LORAWAN_RETRANSMIT_TIMEOUT_MIN_MS              (1000)
@@ -865,7 +864,7 @@ class LoRaWANNode {
       500 is the **maximum** value, but it is not a good idea to go anywhere near that.
       If you have to go above 50 you probably have a bug somewhere. Check your device timing.
     */
-    RadioLibTime_t scanGuard = 5;
+    RadioLibTime_t scanGuard = 10;
 
 #if !RADIOLIB_GODMODE
   protected:
@@ -975,6 +974,9 @@ class LoRaWANNode {
 
     // timestamp when the Rx1/2 windows were closed (timeout or uplink received)
     RadioLibTime_t rxDelayEnd = 0;
+
+    // duration of SPI transaction for phyLayer->launchMode()
+    RadioLibTime_t launchDuration = 0;
 
     // device status - battery level
     uint8_t battLevel = 0xFF;

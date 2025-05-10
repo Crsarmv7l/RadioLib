@@ -923,15 +923,19 @@ int16_t LoRaWANNode::activateOTAA(uint8_t joinDr, LoRaWANJoinEvent_t *joinEvent)
 
   // if requested, delay until transmitting JoinRequest
   RadioLibTime_t tNow = mod->hal->millis();
-  if(this->tUplink > tNow) {
-    RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Delaying transmission by %lu ms", (unsigned long)(this->tUplink - tNow));
-    if(this->tUplink > mod->hal->millis()) {
-      this->sleepDelay(this->tUplink - mod->hal->millis());
+  if(this->tUplink > tNow + this->launchDuration) {
+    RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Delaying transmission by %lu ms", (unsigned long)(this->tUplink - tNow - this->launchDuration));
+    tNow = mod->hal->millis();
+    if(this->tUplink > tNow + this->launchDuration) {
+      this->sleepDelay(this->tUplink - tNow - this->launchDuration);
     }
   }
 
-  // start transmission
+  // start transmission, and time the duration of launchMode() to offset window timing
+  RadioLibTime_t spiStart = mod->hal->millis();
   state = this->phyLayer->launchMode();
+  RadioLibTime_t spiEnd = mod->hal->millis();
+  this->launchDuration = spiEnd - spiStart;
   RADIOLIB_ASSERT(state);
 
   // sleep for the duration of the transmission
@@ -1338,15 +1342,19 @@ int16_t LoRaWANNode::transmitUplink(const LoRaWANChannel_t* chnl, uint8_t* in, u
   
   // if requested, wait until transmitting uplink
   tNow = mod->hal->millis();
-  if(this->tUplink > tNow) {
-    RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Delaying transmission by %lu ms", (unsigned long)(this->tUplink - tNow));
-    if(this->tUplink > mod->hal->millis()) {
-      this->sleepDelay(this->tUplink - mod->hal->millis());
+  if(this->tUplink > tNow + this->launchDuration) {
+    RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Delaying transmission by %lu ms", (unsigned long)(this->tUplink - tNow - this->launchDuration));
+    tNow = mod->hal->millis();
+    if(this->tUplink > tNow + this->launchDuration) {
+      this->sleepDelay(this->tUplink - tNow - this->launchDuration);
     }
   }
 
-  // start transmission
+  // start transmission, and time the duration of launchMode() to offset window timing
+  RadioLibTime_t spiStart = mod->hal->millis();
   state = this->phyLayer->launchMode();
+  RadioLibTime_t spiEnd = mod->hal->millis();
+  this->launchDuration = spiEnd - spiStart;
   RADIOLIB_ASSERT(state);
 
   // sleep for the duration of the transmission
@@ -1433,15 +1441,16 @@ int16_t LoRaWANNode::receiveCommon(uint8_t dir, const LoRaWANChannel_t* dlChanne
     state = this->phyLayer->stageMode(RADIOLIB_RADIO_MODE_RX, &modeCfg);
     RADIOLIB_ASSERT(state);
 
-    // wait for the start of the Rx window
-    RadioLibTime_t waitLen = tReference + dlDelays[window] - mod->hal->millis();
-    // make sure that no underflow occured; if so, clip the delay (although this will likely miss any downlink)
+    // calculate time at which the window should open
+    RadioLibTime_t tWindow = tReference + dlDelays[window];
+    // wait for the start of the Rx window launch
+    // - the launch of Rx window takes a few milliseconds, so shorten the waitLen a bit (launchDuration)
+    // - the Rx window is padded using scanGuard, so shorten the waitLen a bit (scanGuard / 2)
+    RadioLibTime_t waitLen = tWindow - mod->hal->millis() - this->launchDuration - this->scanGuard / 2;
+
+    // make sure that no underflow occured; if so, there's something weird going on so return an error
     if(waitLen > dlDelays[window]) {
-      waitLen = dlDelays[window];
-    }
-    // the waiting duration is shortened a bit to cover any possible timing errors
-    if(waitLen > this->scanGuard) {
-      waitLen -= this->scanGuard;
+      return(RADIOLIB_ERR_NO_RX_WINDOW);
     }
     this->sleepDelay(waitLen);
 
@@ -1449,11 +1458,17 @@ int16_t LoRaWANNode::receiveCommon(uint8_t dir, const LoRaWANChannel_t* dlChanne
     state = this->phyLayer->launchMode();
     tOpen = mod->hal->millis();
     RADIOLIB_ASSERT(state);
-    RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Opening Rx%d window (%d ms timeout)... <-- Rx Delay end ", window, (int)(timeoutHost / 1000 + 2));
+    RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Opened Rx%d window (%d ms timeout)... <-- Rx Delay end ", window, (int)(timeoutHost / 1000 + 2));
     
-    // wait for the timeout to complete (and a small additional delay)
-    this->sleepDelay(timeoutHost / 1000 + this->scanGuard / 2);
+    // wait for the timeout to complete (and a small delay in case the RxTimeout interrupt needs to fire)
+    this->sleepDelay(timeoutHost / 1000);
     RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Closing Rx%d window", window);
+    while(mod->hal->millis() - tOpen - timeoutHost / 1000 <= this->scanGuard) {
+      // wait for the DIO interrupt to fire (RxDone or RxTimeout)
+      if(downlinkAction) {
+        break;
+      }
+    }
 
     // if the IRQ bit for Rx Timeout is not set, something is received, so stop the windows
     timedOut = this->phyLayer->checkIrq(RADIOLIB_IRQ_TIMEOUT);
@@ -1485,7 +1500,7 @@ int16_t LoRaWANNode::receiveCommon(uint8_t dir, const LoRaWANChannel_t* dlChanne
   while(!downlinkAction) {
     mod->hal->yield();
     // stay in Rx mode for the maximum allowed Time-on-Air plus small grace period
-    if(mod->hal->millis() - tOpen > tMax + scanGuard) {
+    if(mod->hal->millis() - tOpen > tMax + this->scanGuard) {
       RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Downlink missing!");
       downlinkComplete = false;
       break;
@@ -1641,35 +1656,24 @@ int16_t LoRaWANNode::parseDownlink(uint8_t* data, size_t* len, LoRaWANEvent_t* e
   }
   
   // get the frame counter
-  uint16_t fCnt16 = LoRaWANNode::ntoh<uint16_t>(&downlinkMsg[RADIOLIB_LORAWAN_FHDR_FCNT_POS]);
+  uint32_t payFCnt16 = LoRaWANNode::ntoh<uint16_t>(&downlinkMsg[RADIOLIB_LORAWAN_FHDR_FCNT_POS]);
 
-  // check the fCntDown value (Network or Application)
-  uint32_t fCntDownPrev = 0;
+  // check the FCntDown value (Network or Application)
+  uint32_t devFCnt32 = 0;
   if (isAppDownlink) {
-    fCntDownPrev = this->aFCntDown;
+    devFCnt32 = this->aFCntDown;
   } else {
-    fCntDownPrev = this->nFCntDown;
+    devFCnt32 = this->nFCntDown;
   }
 
-  // if this is not the first downlink...
-  // assume a 16-bit to 32-bit rollover if difference between counters in LSB is smaller than MAX_FCNT_GAP
-  // if that isn't the case and the received fCnt is smaller or equal to the last heard fCnt, then error
-  uint32_t fCnt32 = fCnt16;
-  if(fCntDownPrev > 0) {
-    if((fCnt16 <= fCntDownPrev) && ((0xFFFF - (uint16_t)fCntDownPrev + fCnt16) > RADIOLIB_LORAWAN_MAX_FCNT_GAP)) {
-      #if !RADIOLIB_STATIC_ONLY
-        delete[] downlinkMsg;
-      #endif
-      if (isAppDownlink) {
-        return(RADIOLIB_ERR_A_FCNT_DOWN_INVALID);
-      } else {
-        return(RADIOLIB_ERR_N_FCNT_DOWN_INVALID);
-      }
-    } else if (fCnt16 <= fCntDownPrev) {
-      uint16_t msb = (fCntDownPrev >> 16) + 1;  // assume a rollover
-      fCnt32 |= ((uint32_t)msb << 16);          // add back the MSB part
-    }
+  // assume a rollover if the FCnt16 in the payload is smaller than the previous FCnt16 known by device
+  // (MAX_FCNT_GAP is deprecated for 1.0.4 / 1.1, TTS and CS both apply a 16-bit rollover)
+  if(payFCnt16 < (devFCnt32 & 0xFFFF)) {
+    RADIOLIB_DEBUG_PROTOCOL_PRINTLN("FCnt rollover: %d -> %d", payFCnt16, devFCnt32);
+    devFCnt32 += 0x10000;   // apply rollover
   }
+  devFCnt32 &= ~0xFFFF;   // clear lower 16 bits known by device
+  devFCnt32 |= payFCnt16; // set lower 16 bits from payload
 
   // check if the ACK bit is set, indicating this frame acknowledges the previous uplink
   bool isConfirmingUp = false;
@@ -1687,10 +1691,11 @@ int16_t LoRaWANNode::parseDownlink(uint8_t* data, size_t* len, LoRaWANEvent_t* e
   }
   downlinkMsg[RADIOLIB_LORAWAN_BLOCK_DIR_POS] = RADIOLIB_LORAWAN_DOWNLINK;
   LoRaWANNode::hton<uint32_t>(&downlinkMsg[RADIOLIB_LORAWAN_BLOCK_DEV_ADDR_POS], this->devAddr);
-  LoRaWANNode::hton<uint16_t>(&downlinkMsg[RADIOLIB_LORAWAN_BLOCK_FCNT_POS], fCnt32);
+  LoRaWANNode::hton<uint16_t>(&downlinkMsg[RADIOLIB_LORAWAN_BLOCK_FCNT_POS], devFCnt32);
   downlinkMsg[RADIOLIB_LORAWAN_MIC_BLOCK_LEN_POS] = downlinkMsgLen - sizeof(uint32_t);
 
   // check the MIC
+  // (if a rollover was more than 16-bit, this will always throw CRC mismatch)
   if(!verifyMIC(downlinkMsg, RADIOLIB_AES128_BLOCK_SIZE + downlinkMsgLen, this->sNwkSIntKey)) {
     #if !RADIOLIB_STATIC_ONLY
       delete[] downlinkMsg;
@@ -1700,9 +1705,9 @@ int16_t LoRaWANNode::parseDownlink(uint8_t* data, size_t* len, LoRaWANEvent_t* e
   
   // save current fCnt to respective frame counter
   if (isAppDownlink) {
-    this->aFCntDown = fCnt32;
+    this->aFCntDown = devFCnt32;
   } else {
-    this->nFCntDown = fCnt32;
+    this->nFCntDown = devFCnt32;
   }
 
   RADIOLIB_DEBUG_PROTOCOL_PRINTLN("Downlink (%sFCntDown = %lu) encoded:", 
@@ -1750,7 +1755,7 @@ int16_t LoRaWANNode::parseDownlink(uint8_t* data, size_t* len, LoRaWANEvent_t* e
   }
 
   // decrypt the frame payload
-  processAES(&downlinkMsg[RADIOLIB_LORAWAN_FRAME_PAYLOAD_POS(fOptsPbLen)], payLen, encKey, dest, fCnt32, RADIOLIB_LORAWAN_DOWNLINK, 0x00, true);
+  processAES(&downlinkMsg[RADIOLIB_LORAWAN_FRAME_PAYLOAD_POS(fOptsPbLen)], payLen, encKey, dest, devFCnt32, RADIOLIB_LORAWAN_DOWNLINK, 0x00, true);
   
   // decrypt any piggy-backed FOpts
   if(fOptsPbLen > 0) {
@@ -1758,7 +1763,7 @@ int16_t LoRaWANNode::parseDownlink(uint8_t* data, size_t* len, LoRaWANEvent_t* e
     if(this->rev == 1) {
       // in LoRaWAN v1.1, the piggy-backed FOpts are encrypted using the NwkSEncKey
       uint8_t ctrId = 0x01 + isAppDownlink; // see LoRaWAN v1.1 errata
-      processAES(&downlinkMsg[RADIOLIB_LORAWAN_FHDR_FOPTS_POS], (size_t)fOptsPbLen, this->nwkSEncKey, fOpts, fCnt32, RADIOLIB_LORAWAN_DOWNLINK, ctrId, true);
+      processAES(&downlinkMsg[RADIOLIB_LORAWAN_FHDR_FOPTS_POS], (size_t)fOptsPbLen, this->nwkSEncKey, fOpts, devFCnt32, RADIOLIB_LORAWAN_DOWNLINK, ctrId, true);
     } else {
       // in LoRaWAN v1.0.x, the piggy-backed FOpts are unencrypted
       memcpy(fOpts, &downlinkMsg[RADIOLIB_LORAWAN_FHDR_FOPTS_POS], (size_t)fOptsPbLen);
@@ -2416,9 +2421,15 @@ void LoRaWANNode::preprocessMacLinkAdr(uint8_t* mPtr, uint8_t cLen, uint8_t* mAd
       case 1:
       case 2:
       case 3:
+        // clear the target 16-bit block
+        chMaskGrp0123 &= ~((uint64_t)0xFFFF << (16 * chMaskCntl));
+        // set the new 16-bit value in that block
         chMaskGrp0123 |= (uint64_t)chMask << (16 * chMaskCntl);
         break;
       case 4:
+        // clear the target 16-bit block
+        chMaskGrp45 &= ~((uint32_t)0xFFFF);
+        // set the new 16-bit value in that block
         chMaskGrp45 |= (uint32_t)chMask;
         break;
       case 5:
